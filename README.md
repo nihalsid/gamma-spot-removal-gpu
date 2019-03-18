@@ -16,9 +16,4 @@ will survive, while most of the gamma pixels lost their magnitude drastically, s
 Adaptive size of median filter:
    3 by 3 for small spots, 5 by 5 for medium ones, 7 by 7 for high level ones.
 
-written by Hongyun Li, visiting physicist at FRM2,TUM,Germany, Feb 09, 2006
-Contact info:
-hongyunlee@yahoo.com, or lihongyun03@mails.tsinghua.edu.cn
-Northwest Institute of Nuclear Technology, China
-
 ported to cuda by Yawar Siddiqui    
