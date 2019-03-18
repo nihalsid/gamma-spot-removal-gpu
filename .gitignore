@@ -1,0 +1,15 @@
+.vs/
+*.pdb
+*.obj
+*.cache
+*.deps
+*.tlog
+*.log
+*.lastbuildstate
+*.exe
+*.exp
+*.ipdb
+*.iobj
+*.ilk
+opencv_world344*.dll
+*.idb

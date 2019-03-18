@@ -1,0 +1,25 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="header">
+      <UniqueIdentifier>{1534eba1-95e7-454d-ab11-f571942d578e}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="helper_cuda.h">
+      <Filter>header</Filter>
+    </ClInclude>
+    <ClInclude Include="helper_functions.h">
+      <Filter>header</Filter>
+    </ClInclude>
+    <ClInclude Include="cuda_ops.h">
+      <Filter>header</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="cuda_ops.cpp" />
+  </ItemGroup>
+</Project>
