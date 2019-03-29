@@ -56,7 +56,6 @@ template <typename T1, typename T2>
 void free_gpu_buffers(T1* d_image_in, T2* d_image_out) {
 	gpuErrchk(cudaFree(d_image_in));
 	gpuErrchk(cudaFree(d_image_out));
-	gpuErrchk(cudaFree(g_kernel_memory));
 }
 
 template <typename T>
@@ -129,13 +128,12 @@ void median_filter(float * d_image_in, float * d_image_out, int im_width, int im
 
 
 __global__ void greater_than_gpu(float *d_image_in_a, float *d_image_in_b, bool *d_image_out, int width, int height, float offset) {
-	int x = blockIdx.y * blockDim.y + threadIdx.y;
-	int y = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const unsigned int loc = x + y * width;
 	
 	if (x >= width || y >= height) return;
-	
-	if (d_image_in_a[loc] > d_image_in_b[loc] + offset)
+	if (d_image_in_a[loc] > (d_image_in_b[loc] + offset))
 		d_image_out[loc] = true;
 	else
 		d_image_out[loc] = false;
@@ -145,12 +143,13 @@ void greater_than(float * d_image_in_a, float * d_image_in_b, bool* d_image_out,
 	dim3 threadsPerBlock(TILE_WIDTH, TILE_WIDTH);
 	//numBlocks should probably be a multiple of warp size here for proper coalesce..
 	dim3 numBlocks(ceil((float)im_width / threadsPerBlock.x), ceil((float)im_height / threadsPerBlock.y));
+	
 	greater_than_gpu <<< numBlocks, threadsPerBlock >>> (d_image_in_a, d_image_in_b, d_image_out, im_width, im_height, offset);
 }
 
 __global__ void less_than_constant_gpu(float *d_image_in, bool *d_image_out, int width, int height, float offset) {
-	int x = blockIdx.y * blockDim.y + threadIdx.y;
-	int y = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const unsigned int loc = x + y * width;
 
 	if (x >= width || y >= height) return;
@@ -169,8 +168,8 @@ void less_than_constant(float * d_image_in, bool* d_image_out, int im_width, int
 }
 
 __global__ void greater_than_constant_gpu(float *d_image_in, bool *d_image_out, int width, int height, float offset) {
-	int x = blockIdx.y * blockDim.y + threadIdx.y;
-	int y = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const unsigned int loc = x + y * width;
 
 	if (x >= width || y >= height) return;
@@ -191,8 +190,8 @@ void greater_than_constant(float * d_image_in, bool* d_image_out, int im_width, 
 
 template <typename T>
 __global__ void multiply_constant_gpu(T *d_image_in, float* d_image_out, int width, int height, float constant_multiplier) {
-	int x = blockIdx.y * blockDim.y + threadIdx.y;
-	int y = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const unsigned int loc = x + y * width;
 
 	if (x >= width || y >= height) return;
@@ -208,8 +207,8 @@ void multiply_constant(T *d_image_in, float* d_image_out, int im_width, int im_h
 }
 
 __global__ void logical_xor_gpu(bool *d_image_in_a, bool *d_image_in_b, bool *d_image_out, int width, int height) {
-	int x = blockIdx.y * blockDim.y + threadIdx.y;
-	int y = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const unsigned int loc = x + y * width;
 
 	if (x >= width || y >= height) return;
@@ -218,8 +217,8 @@ __global__ void logical_xor_gpu(bool *d_image_in_a, bool *d_image_in_b, bool *d_
 }
 
 __global__ void logical_or_gpu(bool *d_image_in_a, bool *d_image_in_b, bool *d_image_out, int width, int height) {
-	int x = blockIdx.y * blockDim.y + threadIdx.y;
-	int y = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const unsigned int loc = x + y * width;
 
 	if (x >= width || y >= height) return;
@@ -228,8 +227,8 @@ __global__ void logical_or_gpu(bool *d_image_in_a, bool *d_image_in_b, bool *d_i
 }
 
 __global__ void logical_and_gpu(bool *d_image_in_a, bool *d_image_in_b, bool *d_image_out, int width, int height) {
-	int x = blockIdx.y * blockDim.y + threadIdx.y;
-	int y = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const unsigned int loc = x + y * width;
 
 	if (x >= width || y >= height) return;
@@ -250,8 +249,8 @@ void logical_operation(bool * d_image_in_a, bool * d_image_in_b, bool* d_image_o
 }
 
 __global__ void clear_borders_gpu(bool* d_image_in_out, int width, int height, int border_size) {
-	int x = blockIdx.y * blockDim.y + threadIdx.y;
-	int y = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const unsigned int loc = x + y * width;
 
 	if (x >= width || y >= height) return;
@@ -273,8 +272,8 @@ void clone_buffer(T* d_image_in, T* d_image_out, int im_width, int im_height) {
 }
 
 __global__ void masked_assign_gpu(float* d_image_in_out_a, float* d_image_in_b, int width, int height, bool* mask) {
-	int x = blockIdx.y * blockDim.y + threadIdx.y;
-	int y = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const unsigned int loc = x + y * width;
 
 	if (x >= width || y >= height) return;
