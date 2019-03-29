@@ -7,7 +7,12 @@
 // Utilities and system includes
 #include <memory>
 #include <opencv2/opencv.hpp>
+#include <cuda_runtime.h>
 #include "cuda_ops.h"
+
+#define ERROR_CHECK \
+	gpuErrchk(cudaPeekAtLastError()); \
+	gpuErrchk(cudaDeviceSynchronize());
 
 void dumpToFile(std::string outfilename, std::shared_ptr<float> array_out, std::vector<int> dims) {
 	std::ofstream fileout;
@@ -128,7 +133,9 @@ void test_median_filter() {
 	float* hostOutputImageData;
 	float* deviceInputImageData = nullptr;
 	float* deviceOutputImageData = nullptr;
+	bool* d_true_mask = nullptr;
 
+	
 	const int filter_size = 3;
 	std::shared_ptr<float> log_filter = createLogFilter(filter_size, 0.8);
 	cv::Mat input = cv::imread("C:\\Users\\Yawar\\Documents\\FRM-II\\test\\salt_pepper.png", cv::IMREAD_UNCHANGED);
@@ -139,12 +146,14 @@ void test_median_filter() {
 			hostInputImageData[col + row * input.cols] = float(input.at<unsigned char>(row, col));
 		}
 	}
+	create_gpu_buffer<bool>(&d_true_mask, input.cols, input.rows);
+	set_to_true(d_true_mask, input.cols, input.rows);
 
 	hostOutputImageData = (float *)malloc(input.rows * input.cols * sizeof(float));
 
 	initialize_gpu_buffers<float, float>(hostInputImageData, &deviceInputImageData, &deviceOutputImageData, input.cols, input.rows);
 	 
-	median_filter(deviceInputImageData, deviceOutputImageData, input.cols, input.rows, filter_size);
+	median_filter(deviceInputImageData, deviceOutputImageData, input.cols, input.rows, filter_size, d_true_mask);
 	   
 	move_gpu_data_to_host<float>(hostOutputImageData, deviceOutputImageData, input.cols, input.rows);
 
@@ -309,72 +318,163 @@ void test_logical_or() {
 }
 
 int gam_rem_adp_log() {
+
 	// create log filter (cpu loop)
-	const int filter_size = 9;
-	std::shared_ptr<float> log_filter = createLogFilter(filter_size, 0.8);
+	const int log_filter_size = 9;
+	const int xmin = 200;
+	const int xmax = 1700;
+	const int ymin = 45;
+	const int ymax = 2500;
+	const float thres3 = 50;
+	const float thres5 = 100;
+	const float thres7 = 200;
+
 	float* d_log_filter = nullptr;
-	initialize_gpu_buffer<float>(log_filter.get(), &d_log_filter, filter_size, filter_size);
-	
-	//dumpToFile("C:\\Users\\Yawar\\Documents\\FRM-II\\test\\logfilter.txt", log_filter, {9, 9});
-	cv::Mat image = readImage("C:\\Users\\Yawar\\Documents\\FRM-II\\data\\ob\\00155908.fits");
+	float* d_box_filter_normalized = nullptr;
+	float* d_image_in = nullptr;
+	float* d_image_log = nullptr;
+	float* d_image_log_m3 = nullptr;
+	float* d_image_buffer_0 = nullptr;
+	float* d_image_buffer_1 = nullptr;
+	float* d_image_adp = nullptr;
+
+	bool* d_image_thres3 = nullptr;
+	bool* d_image_thres5 = nullptr;
+	bool* d_image_thres7 = nullptr;
+	bool* d_image_single7 = nullptr;
+	bool* d_bool_buffer = nullptr;
+	bool* d_true_mask = nullptr;
+
+	float* h_image_in = nullptr;
+	float* h_image_out = nullptr;
+	float* h_single_7 = createBoxFilter(3);
+
+	std::shared_ptr<float> log_filter = createLogFilter(log_filter_size, 0.8);
+
+	initialize_gpu_buffer<float>(log_filter.get(), &d_log_filter, log_filter_size, log_filter_size);
+
+	cv::Mat full_image = readImage("C:\\Users\\Yawar\\Documents\\FRM-II\\data\\ob\\00155908.fits");
+	std::cout << full_image.rows << ", " << full_image.cols << std::endl;
+
+	cv::Mat image(ymax - ymin, xmax - xmin, CV_16UC1);
+	full_image(cv::Rect(xmin, ymin, image.cols, image.rows)).copyTo(image);
+
 	std::cout << image.rows << ", " << image.cols << std::endl;
-	
-	int xmin = 200;
-	int xmax = 1700;
-	int ymin = 45;
-	int ymax = 2500;
+	std::cout << image.at<unsigned short>(0, 0) << ", " << image.at<unsigned short>(0, 1) << ", " << image.at<unsigned short>(0, 2) << "\n";
 
-
-	cv::Mat sub_image(ymax - ymin, xmax - xmin, CV_16UC1);
-	image(cv::Rect(xmin, ymin, sub_image.cols, sub_image.rows)).copyTo(sub_image);
-
-	std::cout << sub_image.rows << ", " << sub_image.cols << std::endl;
-	std::cout << sub_image.at<unsigned short>(0, 0) << ", " << sub_image.at<unsigned short>(0, 1) << ", " << sub_image.at<unsigned short>(0, 2) << "\n";
-	
-	float* h_image_in = (float *)malloc(sub_image.rows * sub_image.cols * sizeof(float));
-	for (int row = 0; row < sub_image.rows; row++) {
-		for (int col = 0; col < sub_image.cols; col++) {
-			h_image_in[col + row * sub_image.cols] = float(sub_image.at<unsigned short>(row, col));
+	h_image_in = (float *)malloc(image.rows * image.cols * sizeof(float));
+	for (int row = 0; row < image.rows; row++) {
+		for (int col = 0; col < image.cols; col++) {
+			h_image_in[col + row * image.cols] = float(image.at<unsigned short>(row, col));
 		}
 	}
-	
-	float* h_image_out = (float *)malloc(sub_image.rows * sub_image.cols * sizeof(float));
-	float* d_image_in = nullptr, *d_image_out = nullptr;
-	 
-	initialize_gpu_buffers<float, float>(h_image_in, &d_image_in, &d_image_out, sub_image.cols, sub_image.rows);
-	convolve(d_image_in, d_image_out, log_filter.get(), sub_image.cols, sub_image.rows, filter_size);
-	median_filter(d_image_out, deviceOutputImageData, input.cols, input.rows, filter_size);
-	move_gpu_data_to_host<float>(h_image_out, d_image_out, sub_image.cols, sub_image.rows);
 
-	cv::Mat image_out(sub_image.rows, sub_image.cols, CV_16UC1);
-	for (int row = 0; row < sub_image.rows; row++) {
-		for (int col = 0; col < sub_image.cols; col++) {
-			image_out.at<unsigned short>(row, col) = h_image_out[col + row * sub_image.cols];
+	h_image_out = (float *)malloc(image.rows * image.cols * sizeof(float));
+
+	initialize_gpu_buffers<float, float>(h_image_in, &d_image_in, &d_image_log, image.cols, image.rows);
+	create_gpu_buffer<float>(&d_image_log_m3, image.cols, image.rows);
+	create_gpu_buffer<float>(&d_image_buffer_0, image.cols, image.rows);
+	create_gpu_buffer<float>(&d_image_buffer_1, image.cols, image.rows);
+	create_gpu_buffer<float>(&d_image_adp, image.cols, image.rows);
+	create_gpu_buffer<float>(&d_box_filter_normalized, 3, 3);
+	create_gpu_buffer<bool>(&d_image_thres3, image.cols, image.rows);
+	create_gpu_buffer<bool>(&d_image_thres5, image.cols, image.rows);
+	create_gpu_buffer<bool>(&d_image_thres7, image.cols, image.rows);
+	create_gpu_buffer<bool>(&d_image_single7, image.cols, image.rows);
+	create_gpu_buffer<bool>(&d_bool_buffer, image.cols, image.rows);
+	create_gpu_buffer<bool>(&d_true_mask, image.cols, image.rows);
+
+	set_to_true(d_true_mask, image.cols, image.rows);
+	move_host_data_to_gpu(d_box_filter_normalized, h_single_7, 3, 3);
+
+	ERROR_CHECK
+
+		convolve(d_image_in, d_image_log, log_filter.get(), image.cols, image.rows, log_filter_size);
+	ERROR_CHECK
+		median_filter(d_image_log, d_image_log_m3, image.cols, image.rows, 3, d_true_mask);
+	ERROR_CHECK
+		greater_than(d_image_log, d_image_log_m3, d_image_thres3, image.cols, image.rows, thres3);
+	greater_than(d_image_log, d_image_log_m3, d_image_thres5, image.cols, image.rows, thres5);
+	greater_than(d_image_log, d_image_log_m3, d_image_thres7, image.cols, image.rows, thres7);
+	ERROR_CHECK
+
+		// TODO: put a condition for non zero img_thres7
+
+		multiply_constant(d_image_thres7, d_image_buffer_0, image.cols, image.rows, 255.f);
+	ERROR_CHECK
+		convolve(d_image_buffer_0, d_image_buffer_0, d_box_filter_normalized, image.cols, image.rows, 3);
+	ERROR_CHECK
+		less_than_constant(d_image_buffer_0, d_image_single7, image.cols, image.rows, 30.f);
+	ERROR_CHECK
+		logical_operation(d_image_single7, d_image_thres7, d_image_single7, image.cols, image.rows, BooleanOperation::AND);
+	ERROR_CHECK
+		logical_operation(d_image_thres7, d_image_single7, d_image_thres7, image.cols, image.rows, BooleanOperation::XOR);
+	ERROR_CHECK
+		multiply_constant(d_image_thres7, d_image_buffer_0, image.cols, image.rows, 255.f);
+	ERROR_CHECK
+		nppiDilate3x3_32f_C1R(d_image_buffer_0, image.cols * sizeof(int), d_image_buffer_1, image.cols * sizeof(int), { image.cols, image.rows });
+	ERROR_CHECK
+		greater_than_constant(d_image_buffer_1, d_bool_buffer, image.cols, image.rows, 0.);
+	ERROR_CHECK
+		logical_operation(d_bool_buffer, d_image_single7, d_image_thres7, image.cols, image.rows, BooleanOperation::OR);
+	ERROR_CHECK
+
+		// end of TODO:if
+
+		logical_operation(d_image_thres5, d_image_thres7, d_bool_buffer, image.cols, image.rows, BooleanOperation::OR);
+	ERROR_CHECK
+		logical_operation(d_bool_buffer, d_image_thres7, d_image_thres5, image.cols, image.rows, BooleanOperation::XOR);
+	ERROR_CHECK
+		logical_operation(d_image_thres3, d_image_thres5, d_image_thres3, image.cols, image.rows, BooleanOperation::XOR);
+	ERROR_CHECK
+
+		clear_borders(d_image_thres7, image.cols, image.rows, 3);
+	clear_borders(d_image_thres5, image.cols, image.rows, 2);
+	ERROR_CHECK
+
+		clone_buffer(d_image_in, d_image_adp, image.cols, image.rows);
+	median_filter(d_image_in, d_image_buffer_0, image.cols, image.rows, 3, d_true_mask);
+	ERROR_CHECK
+
+		masked_assign(d_image_adp, d_image_buffer_0, image.cols, image.rows, d_image_thres3);
+	ERROR_CHECK
+
+		median_filter(d_image_in, d_image_adp, image.cols, image.rows, 3, d_image_thres5);
+	ERROR_CHECK
+		median_filter(d_image_in, d_image_adp, image.cols, image.rows, 4, d_image_thres7);
+	ERROR_CHECK
+
+		move_gpu_data_to_host<float>(h_image_out, d_image_adp, image.cols, image.rows);
+
+	cv::Mat image_out(image.rows, image.cols, CV_16UC1);
+	for (int row = 0; row < image.rows; row++) {
+		for (int col = 0; col < image.cols; col++) {
+			image_out.at<unsigned short>(row, col) = h_image_out[col + row * image.cols];
 		}
 	}
 
 	cv::imwrite("C:\\Users\\Yawar\\Documents\\FRM-II\\test\\out1.png", image_out);
-	
-	// fftconvolve 
-	// med filter
-	// threshold
-	// threshold
-	// threshold
-	// convolve2d
-	// logical xor
-	
-	// logical or, binary dilation
-	// logical xor
-	// logical xor
-	// median filter
-	// median filter
 
-	free_gpu_buffers<float, float>(d_image_in, d_image_out);
 	free(h_image_in);
 	free(h_image_out);
+
+	free_gpu_buffers<float, float>(d_image_in, d_image_log);
+	free_gpu_buffer<float>(d_image_log_m3);
+	free_gpu_buffer<float>(d_image_buffer_0);
+	free_gpu_buffer<float>(d_image_buffer_1);
+	free_gpu_buffer<float>(d_image_adp);
+	free_gpu_buffer<float>(d_box_filter_normalized);
+	free_gpu_buffer<bool>(d_image_thres3);
+	free_gpu_buffer<bool>(d_image_thres5);
+	free_gpu_buffer<bool>(d_image_thres7);
+	free_gpu_buffer<bool>(d_image_single7);
+	free_gpu_buffer<bool>(d_bool_buffer);
+	free_gpu_buffer<bool>(d_true_mask);
+
 	return 0;
 }
 
+
 int main() {
-	test_logical_or();
+	gam_rem_adp_log();
 }
