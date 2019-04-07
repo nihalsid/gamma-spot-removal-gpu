@@ -20,7 +20,7 @@ __global__ void convolution_gpu(float *d_image_in, float *d_image_out, int width
 	float accumulator = 0.f;
 
 	if (x >= width || y >= height) return;
-	
+
 	for (int i = -kernel_radius; i <= kernel_radius; i++) {
 		for (int j = -kernel_radius; j <= kernel_radius; j++) {
 			if ((x + i < 0) || //left side out of bounds
@@ -84,7 +84,7 @@ void convolve(float* d_image_in, float* d_image_out, float* h_kernel_data, int i
 	//numBlocks should probably be a multiple of warp size here for proper coalesce..
 	dim3 numBlocks(ceil((float)im_width / threadsPerBlock.x), ceil((float)im_height / threadsPerBlock.y));
 
-	convolution_gpu <<< numBlocks, threadsPerBlock >>> (d_image_in, d_image_out, im_width, im_height, int(kernel_size / 2));
+	convolution_gpu << < numBlocks, threadsPerBlock >> > (d_image_in, d_image_out, im_width, im_height, int(kernel_size / 2));
 }
 
 
@@ -93,6 +93,7 @@ __global__ void median_filter_gpu(float *d_image_in, float *d_image_out, int wid
 	// Set row and colum for thread.
 	int row = blockIdx.y * blockDim.y + threadIdx.y;
 	int col = blockIdx.x * blockDim.x + threadIdx.x;
+	int half_filter_size = filter_size / 2;
 	if (col >= width || row >= height) return;
 	if (!d_mask[row * width + col]) return;
 
@@ -100,9 +101,10 @@ __global__ void median_filter_gpu(float *d_image_in, float *d_image_out, int wid
 	if ((row == 0) || (col == 0) || (row == height - 1) || (col == width - 1))
 		d_image_out[row*width + col] = 0; //Deal with boundry conditions
 	else {
+
 		for (int x = 0; x < filter_size; x++) {
 			for (int y = 0; y < filter_size; y++) {
-				filterVector[x*filter_size + y] = d_image_in[(row + x - 1)*width + (col + y - 1)];   // setup the filterign window.
+				filterVector[x*filter_size + y] = d_image_in[(row + x - half_filter_size)*width + (col + y - half_filter_size)];   // setup the filterign window.
 			}
 		}
 		for (int i = 0; i < filter_size * filter_size; i++) {
@@ -123,28 +125,35 @@ void median_filter(float * d_image_in, float * d_image_out, int im_width, int im
 	dim3 threadsPerBlock(TILE_WIDTH, TILE_WIDTH);
 	//numBlocks should probably be a multiple of warp size here for proper coalesce..
 	dim3 numBlocks(ceil((float)im_width / threadsPerBlock.x), ceil((float)im_height / threadsPerBlock.y));
-	median_filter_gpu <<< numBlocks, threadsPerBlock >>> (d_image_in, d_image_out, im_width, im_height, kernel_size, d_mask);
+	median_filter_gpu << < numBlocks, threadsPerBlock >> > (d_image_in, d_image_out, im_width, im_height, kernel_size, d_mask);
 }
 
 
-__global__ void greater_than_gpu(float *d_image_in_a, float *d_image_in_b, bool *d_image_out, int width, int height, float offset) {
+__global__ void greater_than_gpu(float *d_image_in_a, float *d_image_in_b, bool *d_image_out, int width, int height, float offset, bool *d_atleast_one_true) {
 	int y = blockIdx.y * blockDim.y + threadIdx.y;
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const unsigned int loc = x + y * width;
-	
+
 	if (x >= width || y >= height) return;
-	if (d_image_in_a[loc] > (d_image_in_b[loc] + offset))
+	if (d_image_in_a[loc] > (d_image_in_b[loc] + offset)) {
 		d_image_out[loc] = true;
+		*d_atleast_one_true = true;
+	}
 	else
 		d_image_out[loc] = false;
 }
 
-void greater_than(float * d_image_in_a, float * d_image_in_b, bool* d_image_out, int im_width, int im_height, float offset) {
+bool greater_than(float * d_image_in_a, float * d_image_in_b, bool* d_image_out, int im_width, int im_height, float offset) {
 	dim3 threadsPerBlock(TILE_WIDTH, TILE_WIDTH);
 	//numBlocks should probably be a multiple of warp size here for proper coalesce..
 	dim3 numBlocks(ceil((float)im_width / threadsPerBlock.x), ceil((float)im_height / threadsPerBlock.y));
-	
-	greater_than_gpu <<< numBlocks, threadsPerBlock >>> (d_image_in_a, d_image_in_b, d_image_out, im_width, im_height, offset);
+	bool* d_atleast_one_true = nullptr;
+	bool h_atleast_one_true = false;
+	gpuErrchk(cudaMalloc(&d_atleast_one_true, sizeof(bool)));
+	gpuErrchk(cudaMemcpy(d_atleast_one_true, &h_atleast_one_true, sizeof(bool), cudaMemcpyHostToDevice));
+	greater_than_gpu << < numBlocks, threadsPerBlock >> > (d_image_in_a, d_image_in_b, d_image_out, im_width, im_height, offset, d_atleast_one_true);
+	gpuErrchk(cudaMemcpy(&h_atleast_one_true, d_atleast_one_true, sizeof(bool), cudaMemcpyDeviceToHost));
+	return h_atleast_one_true;
 }
 
 __global__ void less_than_constant_gpu(float *d_image_in, bool *d_image_out, int width, int height, float offset) {
@@ -164,7 +173,7 @@ void less_than_constant(float * d_image_in, bool* d_image_out, int im_width, int
 	dim3 threadsPerBlock(TILE_WIDTH, TILE_WIDTH);
 	//numBlocks should probably be a multiple of warp size here for proper coalesce..
 	dim3 numBlocks(ceil((float)im_width / threadsPerBlock.x), ceil((float)im_height / threadsPerBlock.y));
-	less_than_constant_gpu <<< numBlocks, threadsPerBlock >>> (d_image_in, d_image_out, im_width, im_height, offset);
+	less_than_constant_gpu << < numBlocks, threadsPerBlock >> > (d_image_in, d_image_out, im_width, im_height, offset);
 }
 
 __global__ void greater_than_constant_gpu(float *d_image_in, bool *d_image_out, int width, int height, float offset) {
@@ -184,7 +193,7 @@ void greater_than_constant(float * d_image_in, bool* d_image_out, int im_width, 
 	dim3 threadsPerBlock(TILE_WIDTH, TILE_WIDTH);
 	//numBlocks should probably be a multiple of warp size here for proper coalesce..
 	dim3 numBlocks(ceil((float)im_width / threadsPerBlock.x), ceil((float)im_height / threadsPerBlock.y));
-	greater_than_constant_gpu <<< numBlocks, threadsPerBlock >>> (d_image_in, d_image_out, im_width, im_height, offset);
+	greater_than_constant_gpu << < numBlocks, threadsPerBlock >> > (d_image_in, d_image_out, im_width, im_height, offset);
 }
 
 
@@ -195,7 +204,8 @@ __global__ void multiply_constant_gpu(T *d_image_in, float* d_image_out, int wid
 	const unsigned int loc = x + y * width;
 
 	if (x >= width || y >= height) return;
-	d_image_out[loc] = (float)d_image_in[loc] * constant_multiplier;
+	
+	d_image_out[loc] = ((float)d_image_in[loc]) * constant_multiplier;
 }
 
 template <typename T>
@@ -203,7 +213,7 @@ void multiply_constant(T *d_image_in, float* d_image_out, int im_width, int im_h
 	dim3 threadsPerBlock(TILE_WIDTH, TILE_WIDTH);
 	dim3 numBlocks(ceil((float)im_width / threadsPerBlock.x), ceil((float)im_height / threadsPerBlock.y));
 
-	multiply_constant_gpu <<< numBlocks, threadsPerBlock >>> (d_image_in, d_image_out, im_width, im_height, constant_multiplier);
+	multiply_constant_gpu << < numBlocks, threadsPerBlock >> > (d_image_in, d_image_out, im_width, im_height, constant_multiplier);
 }
 
 __global__ void logical_xor_gpu(bool *d_image_in_a, bool *d_image_in_b, bool *d_image_out, int width, int height) {
@@ -241,29 +251,11 @@ void logical_operation(bool * d_image_in_a, bool * d_image_in_b, bool* d_image_o
 	//numBlocks should probably be a multiple of warp size here for proper coalesce..
 	dim3 numBlocks(ceil((float)im_width / threadsPerBlock.x), ceil((float)im_height / threadsPerBlock.y));
 	if (operation == BooleanOperation::XOR)
-		logical_xor_gpu <<< numBlocks, threadsPerBlock >>> (d_image_in_a, d_image_in_b, d_image_out, im_width, im_height);
+		logical_xor_gpu << < numBlocks, threadsPerBlock >> > (d_image_in_a, d_image_in_b, d_image_out, im_width, im_height);
 	else if (operation == BooleanOperation::OR)
-		logical_or_gpu <<< numBlocks, threadsPerBlock >>> (d_image_in_a, d_image_in_b, d_image_out, im_width, im_height);
+		logical_or_gpu << < numBlocks, threadsPerBlock >> > (d_image_in_a, d_image_in_b, d_image_out, im_width, im_height);
 	else if (operation == BooleanOperation::AND)
-		logical_and_gpu <<< numBlocks, threadsPerBlock >>> (d_image_in_a, d_image_in_b, d_image_out, im_width, im_height);
-}
-
-__global__ void clear_borders_gpu(bool* d_image_in_out, int width, int height, int border_size) {
-	int y = blockIdx.y * blockDim.y + threadIdx.y;
-	int x = blockIdx.x * blockDim.x + threadIdx.x;
-	const unsigned int loc = x + y * width;
-
-	if (x >= width || y >= height) return;
-	// -1 -> x can be width-1, -2 -> x can be width-2, width-1 
-	if (!((x < border_size || x >= (width - border_size)) && (y < border_size || y >= (height - border_size)))) return;
-	d_image_in_out[loc] = false;
-}
-
-void clear_borders(bool *d_image_in_out, int im_width, int im_height, int border_size) {
-	dim3 threadsPerBlock(TILE_WIDTH, TILE_WIDTH);
-	//numBlocks should probably be a multiple of warp size here for proper coalesce..
-	dim3 numBlocks(ceil((float)im_width / threadsPerBlock.x), ceil((float)im_height / threadsPerBlock.y));
-	clear_borders_gpu <<< numBlocks, threadsPerBlock >>> (d_image_in_out, im_width, im_height, border_size);
+		logical_and_gpu << < numBlocks, threadsPerBlock >> > (d_image_in_a, d_image_in_b, d_image_out, im_width, im_height);
 }
 
 template <typename T>
@@ -277,7 +269,7 @@ __global__ void masked_assign_gpu(float* d_image_in_out_a, float* d_image_in_b, 
 	const unsigned int loc = x + y * width;
 
 	if (x >= width || y >= height) return;
-	
+
 	if (mask[loc]) {
 		d_image_in_out_a[loc] = d_image_in_b[loc];
 	}
@@ -287,7 +279,7 @@ __global__ void masked_assign_gpu(float* d_image_in_out_a, float* d_image_in_b, 
 void masked_assign(float* d_image_in_out_a, float* d_image_in_b, int im_width, int im_height, bool* mask) {
 	dim3 threadsPerBlock(TILE_WIDTH, TILE_WIDTH);
 	dim3 numBlocks(ceil((float)im_width / threadsPerBlock.x), ceil((float)im_height / threadsPerBlock.y));
-	masked_assign_gpu <<< numBlocks, threadsPerBlock >>> (d_image_in_out_a, d_image_in_b, im_width, im_height, mask);
+	masked_assign_gpu << < numBlocks, threadsPerBlock >> > (d_image_in_out_a, d_image_in_b, im_width, im_height, mask);
 }
 
 template void initialize_gpu_buffers(float * h_image_in, float** d_image_in, float** d_image_out, int im_width, int im_height);

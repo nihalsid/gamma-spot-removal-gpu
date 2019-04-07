@@ -192,7 +192,8 @@ void test_npp_dilation() {
 	initialize_gpu_buffers<float, float>(hostInputImageData, &deviceInputImageData, &deviceOutputImageData, input.cols, input.rows);
 	
 	std::cout << nppiDilate3x3_32f_C1R(deviceInputImageData, input.cols * sizeof(int), deviceOutputImageData, input.cols * sizeof(int), { input.cols, input.rows });
-	
+	ERROR_CHECK;
+
 	move_gpu_data_to_host<float>(hostOutputImageData, deviceOutputImageData, input.cols, input.rows);
 
 	cv::Mat image_out(input.rows, input.cols, CV_8UC1);
@@ -323,9 +324,9 @@ int gam_rem_adp_log() {
 	// create log filter (cpu loop)
 	const int log_filter_size = 9;
 	const int xmin = 200;
-	const int xmax = 1700;
+	const int xmax = 1000;
 	const int ymin = 45;
-	const int ymax = 2500;
+	const int ymax = 2000;
 	const float thres3 = 50;
 	const float thres5 = 100;
 	const float thres7 = 200;
@@ -396,58 +397,56 @@ int gam_rem_adp_log() {
 	ERROR_CHECK;   
 	greater_than(d_image_log, d_image_log_m3, d_image_thres3, image.cols, image.rows, thres3);
 	greater_than(d_image_log, d_image_log_m3, d_image_thres5, image.cols, image.rows, thres5);
-	greater_than(d_image_log, d_image_log_m3, d_image_thres7, image.cols, image.rows, thres7);
-	ERROR_CHECK;
-	// TODO: put a condition for non zero img_thres7
-
-	multiply_constant(d_image_thres7, d_image_buffer_0, image.cols, image.rows, 255.f);
-	ERROR_CHECK;
-	convolve(d_image_buffer_0, d_image_buffer_1, d_box_filter_normalized, image.cols, image.rows, 3);
+	bool thres7_nonzero = greater_than(d_image_log, d_image_log_m3, d_image_thres7, image.cols, image.rows, thres7);
 	ERROR_CHECK;
 #ifdef SKIP
-	less_than_constant(d_image_buffer_0, d_image_single7, image.cols, image.rows, 30.f);
-	ERROR_CHECK;
-	logical_operation(d_image_single7, d_image_thres7, d_image_single7, image.cols, image.rows, BooleanOperation::AND);
-	ERROR_CHECK;
-	logical_operation(d_image_thres7, d_image_single7, d_image_thres7, image.cols, image.rows, BooleanOperation::XOR);
-	ERROR_CHECK;
-	multiply_constant(d_image_thres7, d_image_buffer_0, image.cols, image.rows, 255.f);
-	ERROR_CHECK;
-	nppiDilate3x3_32f_C1R(d_image_buffer_0, image.cols * sizeof(int), d_image_buffer_1, image.cols * sizeof(int), { image.cols, image.rows });
-	ERROR_CHECK;
-	greater_than_constant(d_image_buffer_1, d_bool_buffer, image.cols, image.rows, 0.);
-	ERROR_CHECK;
-	logical_operation(d_bool_buffer, d_image_single7, d_image_thres7, image.cols, image.rows, BooleanOperation::OR);
-	ERROR_CHECK;
-
-	// end of TODO:if
+	if (thres7_nonzero) {
+		multiply_constant(d_image_thres7, d_image_buffer_0, image.cols, image.rows, 255.f);
+		ERROR_CHECK;
+		convolve(d_image_buffer_0, d_image_buffer_1, d_box_filter_normalized, image.cols, image.rows, 3);
+		ERROR_CHECK;
+		less_than_constant(d_image_buffer_1, d_image_single7, image.cols, image.rows, 30.f);
+		ERROR_CHECK;
+		logical_operation(d_image_single7, d_image_thres7, d_image_single7, image.cols, image.rows, BooleanOperation::AND);
+		ERROR_CHECK;
+		logical_operation(d_image_thres7, d_image_single7, d_image_thres7, image.cols, image.rows, BooleanOperation::XOR);
+		ERROR_CHECK;
+		multiply_constant(d_image_thres7, d_image_buffer_0, image.cols, image.rows, 255.f);
+		ERROR_CHECK;
+		std::cout << nppiDilate3x3_32f_C1R(d_image_buffer_0, image.cols * sizeof(int), d_image_buffer_1, image.cols * sizeof(int), { image.cols, image.rows }) << std::endl;
+		ERROR_CHECK;
+		greater_than_constant(d_image_buffer_1, d_bool_buffer, image.cols, image.rows, 0.);
+		ERROR_CHECK;
+		logical_operation(d_bool_buffer, d_image_single7, d_image_thres7, image.cols, image.rows, BooleanOperation::OR);
+		ERROR_CHECK;
+	}
+	
 
 	logical_operation(d_image_thres5, d_image_thres7, d_bool_buffer, image.cols, image.rows, BooleanOperation::OR);
 	ERROR_CHECK;
 	logical_operation(d_bool_buffer, d_image_thres7, d_image_thres5, image.cols, image.rows, BooleanOperation::XOR);
 	ERROR_CHECK;
+
 	logical_operation(d_image_thres3, d_image_thres5, d_image_thres3, image.cols, image.rows, BooleanOperation::XOR);
 	ERROR_CHECK;
-
-	clear_borders(d_image_thres7, image.cols, image.rows, 3);
-	clear_borders(d_image_thres5, image.cols, image.rows, 2);
-	ERROR_CHECK;
-
+ 
 	clone_buffer(d_image_in, d_image_adp, image.cols, image.rows);
 	median_filter(d_image_in, d_image_buffer_0, image.cols, image.rows, 3, d_true_mask);
+	
 	ERROR_CHECK;
 
 	masked_assign(d_image_adp, d_image_buffer_0, image.cols, image.rows, d_image_thres3);
 	ERROR_CHECK;
 
-	median_filter(d_image_in, d_image_adp, image.cols, image.rows, 3, d_image_thres5);
+	median_filter(d_image_in, d_image_adp, image.cols, image.rows, 5, d_image_thres5);
 	ERROR_CHECK;
-	median_filter(d_image_in, d_image_adp, image.cols, image.rows, 4, d_image_thres7);
+
+	median_filter(d_image_in, d_image_adp, image.cols, image.rows, 7, d_image_thres7);
 	ERROR_CHECK;
 #endif
 
-	
-	move_gpu_data_to_host<float>(h_image_out, d_image_buffer_1, image.cols, image.rows);
+	multiply_constant<bool>(d_image_thres3, d_image_buffer_0, image.cols, image.rows, 1.f);
+	move_gpu_data_to_host<float>(h_image_out, d_image_buffer_0, image.cols, image.rows);
 
 	std::ofstream datadump;
 	datadump.open("C:\\Users\\Yawar\\Documents\\FRM-II\\test\\cpp_out.dat");
@@ -480,4 +479,5 @@ int gam_rem_adp_log() {
 
 int main() {
 	gam_rem_adp_log();
+	//test_npp_dilation()
 }
