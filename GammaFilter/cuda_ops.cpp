@@ -1,7 +1,9 @@
 #include <iostream>
 #include <cstdlib>
 #include <math.h>
+#include <stdlib.h>
 #include <cuda_ops.h>
+#include <float.h>
 
 #define TILE_WIDTH 16
 #define MAX_KERNEL_SIZE 11
@@ -94,6 +96,8 @@ __global__ void median_filter_gpu(float *d_image_in, float *d_image_out, int wid
 	int row = blockIdx.y * blockDim.y + threadIdx.y;
 	int col = blockIdx.x * blockDim.x + threadIdx.x;
 	int half_filter_size = filter_size / 2;
+	int num_valid_elements = 0;
+	int filter_height = filter_size;
 	if (col >= width || row >= height) return;
 	if (!d_mask[row * width + col]) return;
 
@@ -104,7 +108,16 @@ __global__ void median_filter_gpu(float *d_image_in, float *d_image_out, int wid
 
 		for (int x = 0; x < filter_size; x++) {
 			for (int y = 0; y < filter_size; y++) {
-				filterVector[x*filter_size + y] = d_image_in[(row + x - half_filter_size)*width + (col + y - half_filter_size)];   // setup the filterign window.
+				int ii = (row + x - half_filter_size);
+				int jj = (col + y - half_filter_size);
+				if ( ii >= 0 && ii < height && jj >=0 && jj < width) {
+					filterVector[x*filter_size + y] = d_image_in[ii * width + jj];   // setup the filtering window.
+					num_valid_elements++;
+				}
+				else {
+					filterVector[x*filter_size + y] = FLT_MAX;
+				}
+				
 			}
 		}
 		for (int i = 0; i < filter_size * filter_size; i++) {
@@ -117,7 +130,7 @@ __global__ void median_filter_gpu(float *d_image_in, float *d_image_out, int wid
 				}
 			}
 		}
-		d_image_out[row*width + col] = filterVector[(filter_size * filter_size) / 2];   //Set the output variables.
+		d_image_out[row*width + col] = filterVector[num_valid_elements / 2];   //Set the output variables.
 	}
 }
 

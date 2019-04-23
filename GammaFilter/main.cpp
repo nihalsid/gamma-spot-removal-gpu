@@ -421,7 +421,7 @@ int gam_rem_adp_log() {
 		ERROR_CHECK;
 	}
 	
-
+	 
 	logical_operation(d_image_thres5, d_image_thres7, d_bool_buffer, image.cols, image.rows, BooleanOperation::OR);
 	ERROR_CHECK;
 	logical_operation(d_bool_buffer, d_image_thres7, d_image_thres5, image.cols, image.rows, BooleanOperation::XOR);
